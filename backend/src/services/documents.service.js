@@ -1,17 +1,29 @@
-const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const documentsRepository = require('../repositories/documents.repository');
+const ApplicationError = require('../errors/application-error');
 
-async function createDocument(file, owner) {
+const configuredOwnerQuota = Number(process.env.MAX_DOCUMENTS_PER_USER);
+const maxDocumentsPerUser = Number.isInteger(configuredOwnerQuota) && configuredOwnerQuota > 0
+  ? configuredOwnerQuota
+  : 1000;
+
+function getUploadValidationError(file, owner) {
   if (file.size === 0) {
-    await fs.unlink(file.path).catch(() => {});
-    const error = new Error('O arquivo enviado está vazio.');
-    error.statusCode = 400;
-    error.code = 'EMPTY_FILE';
-    throw error;
+    return new ApplicationError('EMPTY_FILE', 'O arquivo enviado está vazio.');
   }
 
-  const document = {
+  if (documentsRepository.countByOwner(owner) >= maxDocumentsPerUser) {
+    return new ApplicationError(
+      'DOCUMENT_QUOTA_EXCEEDED',
+      'Limite de documentos deste usuário atingido.',
+    );
+  }
+
+  return null;
+}
+
+function createDocumentMetadata(file, owner) {
+  return {
     id: crypto.randomUUID(),
     originalName: file.originalname,
     size: file.size,
@@ -19,8 +31,31 @@ async function createDocument(file, owner) {
     owner,
     storagePath: file.path,
   };
+}
 
-  return documentsRepository.add(document);
+async function cleanupAndThrow(filePath, error) {
+  try {
+    await documentsRepository.deleteStoredFile(filePath);
+  } catch (cleanupError) {
+    error.cause = cleanupError;
+  }
+
+  throw error;
+}
+
+async function createDocument(file, owner) {
+  const validationError = getUploadValidationError(file, owner);
+  if (validationError) {
+    return cleanupAndThrow(file.path, validationError);
+  }
+
+  const document = createDocumentMetadata(file, owner);
+
+  try {
+    return documentsRepository.add(document);
+  } catch (error) {
+    return cleanupAndThrow(file.path, error);
+  }
 }
 
 function listDocuments(owner) {
@@ -35,10 +70,13 @@ async function findDocumentForDownload(id, owner) {
   }
 
   try {
-    await fs.access(document.storagePath);
+    await documentsRepository.assertStoredFileExists(document.storagePath);
     return document;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
   }
 }
 

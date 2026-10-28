@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DocumentList from './components/DocumentList.jsx';
 import UploadComponent from './components/UploadComponent.jsx';
 import {
@@ -21,6 +21,8 @@ export default function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const normalizedUserId = userId.trim();
+  const currentUserId = useRef(normalizedUserId);
+  currentUserId.current = normalizedUserId;
   const visibleDocuments = loadedForUser === normalizedUserId ? documents : [];
 
   useEffect(() => {
@@ -71,18 +73,22 @@ export default function App() {
   }
 
   async function handleUpload(file) {
+    const uploadOwner = normalizedUserId;
     setError('');
     setNotice('');
     setIsUploading(true);
 
     try {
-      const document = await uploadDocument(file, normalizedUserId);
-      setDocuments((currentDocuments) => [document, ...currentDocuments]);
-      setLoadedForUser(normalizedUserId);
-      setNotice('Documento enviado.');
+      await uploadDocument(file, uploadOwner);
+      if (currentUserId.current === uploadOwner) {
+        setRefreshKey((currentKey) => currentKey + 1);
+        setNotice('Documento enviado.');
+      }
       return true;
     } catch (requestError) {
-      setError(requestError.message);
+      if (currentUserId.current === uploadOwner) {
+        setError(requestError.message);
+      }
       return false;
     } finally {
       setIsUploading(false);
