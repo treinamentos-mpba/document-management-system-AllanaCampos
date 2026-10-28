@@ -13,14 +13,23 @@
 const express = require('express');
 const multer = require('multer');
 const documentsRouter = require('./routes/documents.routes');
+const ApplicationError = require('./errors/application-error');
+
+const applicationErrorStatuses = {
+  USER_REQUIRED: 401,
+  INVALID_USER: 400,
+  FILE_REQUIRED: 400,
+  DOCUMENT_NOT_FOUND: 404,
+  EMPTY_FILE: 400,
+  DOCUMENT_QUOTA_EXCEEDED: 429,
+  UPLOAD_RATE_LIMIT: 429,
+};
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Endpoint de verificação de saúde. As demais rotas (/upload, /documents,
-// /documents/:id/download) serão implementadas durante o Passo 2.
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
@@ -32,24 +41,21 @@ app.use((error, req, res, next) => {
     return next(error);
   }
 
-  if (error instanceof multer.MulterError) {
-    const statusCode = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-    const message = statusCode === 413
-      ? 'O arquivo excede o tamanho máximo permitido.'
-      : 'Não foi possível processar o arquivo enviado.';
-
-    return res.status(statusCode).json({
-      error: { code: error.code, message },
-    });
-  }
-
-  const statusCode = error.statusCode || 500;
+  const isMulterError = error instanceof multer.MulterError;
+  const statusCode = isMulterError
+    ? error.code === 'LIMIT_FILE_SIZE' ? 413 : 400
+    : error instanceof ApplicationError ? applicationErrorStatuses[error.code] || 500 : 500;
+  const code = isMulterError ? error.code : error.code || 'INTERNAL_ERROR';
   const message = statusCode === 500
     ? 'Ocorreu um erro interno.'
-    : error.message;
+    : isMulterError && statusCode === 413
+      ? 'O arquivo excede o tamanho máximo permitido.'
+      : isMulterError
+        ? 'Não foi possível processar o arquivo enviado.'
+        : error instanceof ApplicationError ? error.message : 'Ocorreu um erro interno.';
 
   return res.status(statusCode).json({
-    error: { code: error.code || 'INTERNAL_ERROR', message },
+    error: { code, message },
   });
 });
 

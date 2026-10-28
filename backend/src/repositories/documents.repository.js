@@ -1,3 +1,5 @@
+const fs = require('node:fs/promises');
+
 const documents = new Map();
 
 function toPublicDocument(document) {
@@ -17,9 +19,40 @@ function listByOwner(owner) {
     .map(toPublicDocument);
 }
 
+function countByOwner(owner) {
+  let count = 0;
+  for (const document of documents.values()) {
+    if (document.owner === owner) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function findByIdAndOwner(id, owner) {
   const document = documents.get(id);
   return document?.owner === owner ? document : null;
 }
 
-module.exports = { add, listByOwner, findByIdAndOwner };
+async function deleteStoredFile(filePath) {
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
+
+function assertStoredFileExists(filePath) {
+  return fs.access(filePath);
+}
+
+module.exports = {
+  add,
+  listByOwner,
+  countByOwner,
+  findByIdAndOwner,
+  deleteStoredFile,
+  assertStoredFileExists,
+};
